@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waitangi Wheel — Kaimahi admin</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="wheel.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login -->
+  <div class="card" id="loginCard" style="display:none">
+    <h1>Waitangi Wheel — Kaimahi</h1>
+    <p class="sub">Sign in with your Te Awhi staff account</p>
+    <div class="row"><input type="email" id="email" placeholder="Email" autocomplete="username"></div>
+    <div class="row"><input type="password" id="password" placeholder="Password" autocomplete="current-password"></div>
+    <div class="row"><button class="btn primary" id="loginBtn">Sign in</button></div>
+    <p class="status err" id="loginError"></p>
+  </div>
+
+  <!-- Client list -->
+  <div class="card noprint" id="listCard" style="display:none">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Clients</h2>
+      <button class="btn small" id="signOut">Sign out</button>
+    </div>
+    <div class="row" style="justify-content:flex-start">
+      <input type="text" id="newName" placeholder="New client name">
+      <button class="btn primary" id="addBtn">Add client</button>
+    </div>
+    <p class="status" id="listStatus"></p>
+    <table id="clientTable"></table>
+  </div>
+
+  <!-- Client detail -->
+  <div class="card" id="detailCard" style="display:none">
+    <div class="row noprint" style="justify-content:space-between">
+      <button class="btn small" id="backBtn">← Back to clients</button>
+      <button class="btn small" onclick="window.print()">Print / save as PDF</button>
+    </div>
+    <h1 id="detailName"></h1>
+    <p class="sub">Waitangi Wheel check-in &nbsp;·&nbsp; ● Week 1 &nbsp; ▲ Week 5 &nbsp; ■ Week 10</p>
+    <div class="wheelbox" id="detailWheel"></div>
+    <table id="detailTable"></table>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const W = window.WaitangiWheel;
+  const cfg = window.WHEEL_CONFIG;
+  const $ = id => document.getElementById(id);
+  const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+
+  const cards = ["loginCard","listCard","detailCard"];
+  function show(...ids){
+    cards.forEach(c => $(c).style.display = ids.includes(c) ? "" : "none");
+  }
+
+  function clientLink(token){
+    const base = location.href.replace(/admin\.html.*$/, "");
+    return base + "?t=" + token;
+  }
+
+  let clients = [];
+
+  async function loadClients(){
+    const { data, error } = await sb
+      .from("clients")
+      .select("id, name, token, created_at, checkins(week, spokes, updated_at)")
+      .order("created_at", { ascending: false });
+    if(error){ $("listStatus").textContent = "Couldn't load clients: " + error.message; $("listStatus").className="status err"; return; }
+    clients = data;
+    renderList();
+  }
+
+  function weekPills(checkins){
+    return W.WEEKS.map(w=>{
+      const done = checkins.some(c => c.week === w && (c.spokes||[]).some(v=>v));
+      const nm = W.WEEK_META[w].name.replace("Week ","W");
+      return `<span class="pill ${done?"done":"todo"}">${nm}</span>`;
+    }).join("");
+  }
+
+  function renderList(){
+    if(!clients.length){ $("clientTable").innerHTML = `<tr><td>No clients yet — add your first one above.</td></tr>`; return; }
+    let html = `<tr><th>Name</th><th>Check-ins</th><th>Personal link</th><th></th></tr>`;
+    clients.forEach((c,i)=>{
+      html += `<tr class="clientrow">
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td>${weekPills(c.checkins)}</td>
+        <td><button class="btn small" data-copy="${i}">Copy link</button></td>
+        <td style="text-align:right">
+          <button class="btn small" data-view="${i}">View wheel</button>
+          <button class="btn small warn" data-del="${i}">Delete</button>
+        </td></tr>`;
+    });
+    $("clientTable").innerHTML = html;
+
+    document.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click", async ()=>{
+      await navigator.clipboard.writeText(clientLink(clients[+b.dataset.copy].token));
+      b.textContent = "Copied ✓"; setTimeout(()=>b.textContent="Copy link", 1500);
+    }));
+    document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click", ()=>viewClient(clients[+b.dataset.view])));
+    document.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click", async ()=>{
+      const c = clients[+b.dataset.del];
+      if(!confirm(`Delete ${c.name} and all their check-ins? This cannot be undone.`)) return;
+      const { error } = await sb.from("clients").delete().eq("id", c.id);
+      if(error) alert("Couldn't delete: " + error.message);
+      loadClients();
+    }));
+  }
+
+  function viewClient(c){
+    const weeks = W.emptyWeeks();
+    c.checkins.forEach(ch => { if(Array.isArray(ch.spokes)) weeks[ch.week] = ch.spokes; });
+    $("detailName").textContent = c.name;
+    W.render($("detailWheel"), { weeks, activeWeek: "w10", interactive: false });
+    W.renderTable($("detailTable"), weeks);
+    show("detailCard");
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+  }
+
+  // events
+  $("loginBtn").addEventListener("click", async ()=>{
+    $("loginError").textContent = "";
+    const { error } = await sb.auth.signInWithPassword({
+      email: $("email").value.trim(), password: $("password").value
+    });
+    if(error){ $("loginError").textContent = "Sign-in failed: " + error.message; return; }
+    show("listCard"); loadClients();
+  });
+  $("password").addEventListener("keydown", e => { if(e.key === "Enter") $("loginBtn").click(); });
+
+  $("signOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); show("loginCard"); });
+  $("backBtn").addEventListener("click", ()=>{ show("listCard"); });
+
+  $("addBtn").addEventListener("click", async ()=>{
+    const name = $("newName").value.trim();
+    if(!name) return;
+    const { data, error } = await sb.from("clients").insert({ name }).select().single();
+    if(error){ $("listStatus").textContent = "Couldn't add: " + error.message; $("listStatus").className = "status err"; return; }
+    $("newName").value = "";
+    await navigator.clipboard.writeText(clientLink(data.token)).catch(()=>{});
+    $("listStatus").textContent = `${data.name} added — personal link copied to clipboard.`;
+    $("listStatus").className = "status ok";
+    loadClients();
+  });
+
+  // start
+  (async function init(){
+    if(cfg.SUPABASE_URL.startsWith("PASTE")){
+      document.body.innerHTML = '<div class="msg">Not set up yet — the Supabase details in config.js are missing.</div>';
+      return;
+    }
+    const { data: { session } } = await sb.auth.getSession();
+    if(session){ show("listCard"); loadClients(); }
+    else show("loginCard");
+  })();
+})();
+</script>
+</body>
+</html>

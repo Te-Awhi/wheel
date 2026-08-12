@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waitangi Wheel check-in — Te Awhi</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="wheel.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Waitangi Wheel check-in</h1>
+    <p class="sub" id="greeting">Mark each spoke from 1 to 5 &nbsp;·&nbsp; 1 = not yet felt &nbsp;·&nbsp; 5 = strongly present</p>
+
+    <div id="app" style="display:none">
+      <div class="row" id="weekbtns">
+        <button class="weekbtn active" data-week="w1">
+          <svg width="14" height="14"><circle cx="7" cy="7" r="6" fill="currentColor"/></svg> Week 1
+        </button>
+        <button class="weekbtn" data-week="w5">
+          <svg width="14" height="14"><polygon points="7,0.5 13.5,13 0.5,13" fill="currentColor"/></svg> Week 5
+        </button>
+        <button class="weekbtn" data-week="w10">
+          <svg width="14" height="14"><rect x="1" y="1" width="12" height="12" fill="currentColor"/></svg> Week 10
+        </button>
+      </div>
+      <p class="hint">Choose your week, then tap along each spoke to mark how it feels right now. Tap the same spot again to clear it.</p>
+
+      <div class="wheelbox" id="wheelbox"></div>
+      <p class="status" id="status"></p>
+      <table id="summary"></table>
+
+      <div class="actions">
+        <button class="btn" onclick="window.print()">Print / save as PDF</button>
+      </div>
+    </div>
+
+    <div id="message" class="msg">Loading your wheel…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const W = window.WaitangiWheel;
+  const cfg = window.WHEEL_CONFIG;
+  const token = new URLSearchParams(location.search).get("t");
+  const msgEl = document.getElementById("message");
+  const appEl = document.getElementById("app");
+  const statusEl = document.getElementById("status");
+
+  if(!token){
+    msgEl.textContent = "This page needs your personal link. Please use the link Te Awhi gave you.";
+    return;
+  }
+  if(cfg.SUPABASE_URL.startsWith("PASTE")){
+    msgEl.textContent = "Not set up yet — the Supabase details in config.js are missing.";
+    return;
+  }
+
+  const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+  let weeks = W.emptyWeeks();
+  let activeWeek = "w1";
+
+  function setStatus(text, cls){
+    statusEl.textContent = text;
+    statusEl.className = "status " + (cls || "");
+  }
+
+  function draw(){
+    W.render(document.getElementById("wheelbox"), {
+      weeks, activeWeek, interactive: true,
+      onTap: (axis, level) => {
+        weeks[activeWeek][axis] = (weeks[activeWeek][axis] === level) ? null : level;
+        draw();
+        save();
+      }
+    });
+    W.renderTable(document.getElementById("summary"), weeks);
+  }
+
+  let saveTimer = null;
+  function save(){
+    setStatus("Saving…");
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async ()=>{
+      const { error } = await sb.rpc("wheel_save", {
+        p_token: token, p_week: activeWeek, p_spokes: weeks[activeWeek]
+      });
+      if(error){ setStatus("Couldn't save — check your connection and tap again.", "err"); }
+      else { setStatus("Saved ✓", "ok"); setTimeout(()=>setStatus(""), 2000); }
+    }, 400);
+  }
+
+  document.querySelectorAll(".weekbtn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      activeWeek = btn.dataset.week;
+      document.querySelectorAll(".weekbtn").forEach(b=>b.classList.toggle("active", b===btn));
+      draw();
+    });
+  });
+
+  (async function load(){
+    const { data, error } = await sb.rpc("wheel_get", { p_token: token });
+    if(error){
+      msgEl.textContent = "Something went wrong loading your wheel. Please try again shortly.";
+      return;
+    }
+    if(!data){
+      msgEl.textContent = "This link wasn't recognised. Please check with Te Awhi for your personal link.";
+      return;
+    }
+    for(const w of W.WEEKS){
+      if(Array.isArray(data.weeks?.[w])) weeks[w] = data.weeks[w];
+    }
+    document.getElementById("greeting").textContent =
+      `Kia ora ${data.name} — mark each spoke from 1 to 5 · 1 = not yet felt · 5 = strongly present`;
+    msgEl.style.display = "none";
+    appEl.style.display = "";
+    draw();
+  })();
+})();
+</script>
+</body>
+</html>
