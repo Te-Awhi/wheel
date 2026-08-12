@@ -44,6 +44,7 @@ If the database already exists from an earlier version, run `migration.sql` once
 - Whānau mark all six spokes, then tap **Submit** for that week. After a confirm, the week is locked — it can't be changed on their link.
 - The kaimahi can **Unlock** a submitted week from the client's wheel view in admin (for genuine corrections only).
 - The admin **Rōpū overview** dashboard counts *submitted* check-ins only: per-spoke averages, how many whānau score 4–5 ("often/strongly present"), and the Week 1 → Week 10 shift — ready for programme reporting.
+- The dashboard also draws a **trend chart** (one line per spoke across Week 1 → 5 → 10, plus a dashed overall line — hover a week for exact numbers) and a **Highlights** list: overall movement, most growth, anything that dipped, the strongest spoke, and the current focus area. Print / save as PDF includes both.
 
 ## Day-to-day use
 

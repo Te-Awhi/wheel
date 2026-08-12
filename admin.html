@@ -32,6 +32,13 @@
       </div>
     </div>
     <div class="statgrid" id="statgrid"></div>
+    <div id="trendSection" style="display:none">
+      <h3 class="dashsec">Trend across the hīkoi</h3>
+      <div class="legend" id="trendLegend"></div>
+      <div class="trendbox" id="trendbox"></div>
+      <h3 class="dashsec">Highlights</h3>
+      <ul class="insights" id="insights"></ul>
+    </div>
     <table id="dashTable"></table>
     <p class="small" id="dashNote" style="text-align:center;margin-top:8px"></p>
   </div>
@@ -99,6 +106,10 @@
 
   /* ---------- Dashboard ---------- */
 
+  // Per-spoke line colours (fixed order, CVD-checked); deep green is reserved for "Overall".
+  const SPOKE_COLORS = ["#0f7e52","#3a6fb5","#c07a2e","#5b4b8a","#a04b3a","#0a8fae"];
+  const OVERALL_COLOR = "#14453d";
+
   function renderDashboard(){
     const total = clients.length;
     const submitted = {};       // week -> array of spokes arrays (submitted only)
@@ -116,6 +127,7 @@
     const anySubmitted = W.WEEKS.some(w => submitted[w].length);
     if(!anySubmitted){
       $("dashTable").innerHTML = "";
+      $("trendSection").style.display = "none";
       $("dashNote").textContent = "Numbers appear here once whānau submit their check-ins.";
       return;
     }
@@ -127,6 +139,60 @@
       const high = vals.filter(v => v >= 4).length;
       return { avg, high, n: vals.length };
     }
+
+    /* --- Trend chart --- */
+    const counts = {};
+    W.WEEKS.forEach(w => counts[w] = submitted[w].length);
+    const overallVals = {};
+    W.WEEKS.forEach(w => {
+      const all = [];
+      submitted[w].forEach(sp => sp.forEach(v => { if(v != null) all.push(v); }));
+      overallVals[w] = all.length ? all.reduce((x,y)=>x+y,0)/all.length : null;
+    });
+    const trendSeries = W.SPOKES.map((s,i) => {
+      const values = {};
+      W.WEEKS.forEach(w => { const st = stats(w,i); values[w] = st ? st.avg : null; });
+      return { label: s.label, color: SPOKE_COLORS[i], values };
+    });
+    trendSeries.push({ label: "Overall", color: OVERALL_COLOR, dashed: true, values: overallVals });
+    $("trendSection").style.display = "";
+    $("trendLegend").innerHTML = trendSeries.map(s =>
+      `<span class="key"><span class="swatch${s.dashed ? " dashed" : ""}" style="border-top-color:${s.color}"></span>${s.label}</span>`).join("");
+    W.renderTrendChart($("trendbox"), { series: trendSeries, counts });
+
+    /* --- Highlights --- */
+    const weeksWith = W.WEEKS.filter(w => counts[w]);
+    const base = weeksWith[0], latest = weeksWith[weeksWith.length - 1];
+    const wname = w => W.WEEK_META[w].name;
+    const f = v => v.toFixed(1);
+    const items = [];
+    const latestStats = W.SPOKES.map((s,i) => ({ i, s, st: stats(latest, i) })).filter(x => x.st);
+    if(latest !== base){
+      const d = overallVals[latest] - overallVals[base];
+      const arrow = d > 0.05 ? `<span class="chg-up">▲ +${f(d)}</span>` : d < -0.05 ? `<span class="chg-down">▼ ${f(d)}</span>` : "◆ steady";
+      items.push({ color: OVERALL_COLOR, html: `<strong>Overall:</strong> ${f(overallVals[base])} at ${wname(base)} → <strong>${f(overallVals[latest])}</strong> by ${wname(latest)} ${arrow}` });
+      const shifts = W.SPOKES.map((s,i) => {
+        const a = stats(base, i), b = stats(latest, i);
+        return a && b ? { i, s, a, b, d: b.avg - a.avg } : null;
+      }).filter(Boolean);
+      if(shifts.length){
+        const up = shifts.reduce((m,x) => x.d > m.d ? x : m);
+        if(up.d > 0.05) items.push({ color: SPOKE_COLORS[up.i], html:
+          `<strong>Most growth:</strong> ${up.s.label} — ${up.s.sub}: ${f(up.a.avg)} → ${f(up.b.avg)} <span class="chg-up">▲ +${f(up.d)}</span> · ${up.a.high}/${up.a.n} whānau at 4–5 → ${up.b.high}/${up.b.n}` });
+        const down = shifts.reduce((m,x) => x.d < m.d ? x : m);
+        if(down.d < -0.05) items.push({ color: SPOKE_COLORS[down.i], html:
+          `<strong>Dipped:</strong> ${down.s.label} — ${down.s.sub}: ${f(down.a.avg)} → ${f(down.b.avg)} <span class="chg-down">▼ ${f(down.d)}</span> — worth exploring with the rōpū` });
+      }
+    } else {
+      items.push({ color: OVERALL_COLOR, html: `<strong>${wname(base)} baseline:</strong> overall average <strong>${f(overallVals[base])}</strong> from ${counts[base]} submitted check-in${counts[base] === 1 ? "" : "s"}` });
+    }
+    if(latestStats.length){
+      const hi = latestStats.reduce((m,x) => x.st.avg > m.st.avg ? x : m);
+      const lo = latestStats.reduce((m,x) => x.st.avg < m.st.avg ? x : m);
+      items.push({ color: SPOKE_COLORS[hi.i], html: `<strong>Strongest at ${wname(latest)}:</strong> ${hi.s.label} — ${hi.s.sub} (${f(hi.st.avg)} · ${hi.st.high}/${hi.st.n} whānau at 4–5)` });
+      if(lo.i !== hi.i) items.push({ color: SPOKE_COLORS[lo.i], html: `<strong>Focus area:</strong> ${lo.s.label} — ${lo.s.sub} (${f(lo.st.avg)} · ${lo.st.high}/${lo.st.n} whānau at 4–5) — where the mahi is` });
+    }
+    $("insights").innerHTML = items.map(it => `<li><span class="dot" style="background:${it.color}"></span><span>${it.html}</span></li>`).join("");
 
     let html = `<tr><th>Spoke</th>` +
       W.WEEKS.map(w=>`<th style="color:${W.WEEK_META[w].raw}">${W.WEEK_META[w].name}</th>`).join("") +
