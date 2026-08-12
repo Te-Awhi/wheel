@@ -35,6 +35,16 @@ Interactive self-assessment wheel for the 10-week programme. Clients mark six sp
 
 Later, when DNS is sorted, the same repo can serve at `wheel.teawhi.org.nz` (Pages → Custom domain).
 
+## Updating an existing install
+
+If the database already exists from an earlier version, run `migration.sql` once in the SQL Editor (adds submit-and-lock), then re-upload the changed files to GitHub.
+
+## How submit & lock works
+
+- Whānau mark all six spokes, then tap **Submit** for that week. After a confirm, the week is locked — it can't be changed on their link.
+- The kaimahi can **Unlock** a submitted week from the client's wheel view in admin (for genuine corrections only).
+- The admin **Rōpū overview** dashboard counts *submitted* check-ins only: per-spoke averages, how many whānau score 4–5 ("often/strongly present"), and the Week 1 → Week 10 shift — ready for programme reporting.
+
 ## Day-to-day use
 
 1. Kaimahi signs in to the admin page → **Add client** → link is copied to clipboard.

@@ -48,6 +48,22 @@ td:first-child,th:first-child{text-align:left}
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem;font-weight:600;margin-right:4px}
 .pill.done{background:#eef7f1;color:var(--w1)}
 .pill.todo{background:var(--faint);color:var(--mid)}
+.small{font-size:.78rem;color:var(--mid);font-weight:400}
+.explain{border:1.5px solid var(--faint);border-radius:10px;padding:10px 14px;margin-bottom:14px;background:#f7faf5}
+.explain summary{cursor:pointer;font-weight:700;color:var(--deep)}
+.explain p{font-size:.9rem;line-height:1.5}
+.explain ol.scale{font-size:.88rem;line-height:1.6;margin:6px 0;padding-left:22px}
+.explain ul.statements{font-size:.88rem;line-height:1.55;margin:6px 0;padding-left:20px}
+.explain ul.statements li{margin-bottom:6px}
+.lockbanner{display:inline-block;padding:8px 18px;border-radius:999px;background:#eef7f1;color:var(--w1);font-weight:700;font-size:.95rem}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.pill.draft{background:#faf2e7;color:var(--w5)}
+.statgrid{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:8px}
+.stat{background:var(--sage);border-radius:10px;padding:10px 18px;text-align:center;min-width:100px}
+.stat .big{font-size:1.5rem;font-weight:800;line-height:1.1}
+.stat .lbl{font-size:.75rem;color:var(--mid);font-weight:600}
+.cellbar{height:5px;border-radius:3px;background:var(--faint);margin:4px auto 2px;max-width:70px;overflow:hidden}
+.cellbar i{display:block;height:100%;border-radius:3px}
 @media print{
   body{background:#fff}
   .actions,.hint,.note,.status,.noprint{display:none !important}

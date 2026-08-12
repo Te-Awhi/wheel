@@ -22,18 +22,30 @@
     <p class="status err" id="loginError"></p>
   </div>
 
+  <!-- Dashboard -->
+  <div class="card" id="dashCard" style="display:none">
+    <div class="row noprint" style="justify-content:space-between">
+      <h2 style="margin:0">Rōpū overview</h2>
+      <div>
+        <button class="btn small" onclick="window.print()">Print / save as PDF</button>
+        <button class="btn small" id="signOut">Sign out</button>
+      </div>
+    </div>
+    <div class="statgrid" id="statgrid"></div>
+    <table id="dashTable"></table>
+    <p class="small" id="dashNote" style="text-align:center;margin-top:8px"></p>
+  </div>
+
   <!-- Client list -->
   <div class="card noprint" id="listCard" style="display:none">
-    <div class="row" style="justify-content:space-between">
-      <h2 style="margin:0">Clients</h2>
-      <button class="btn small" id="signOut">Sign out</button>
-    </div>
+    <h2>Clients</h2>
     <div class="row" style="justify-content:flex-start">
       <input type="text" id="newName" placeholder="New client name">
       <button class="btn primary" id="addBtn">Add client</button>
     </div>
     <p class="status" id="listStatus"></p>
     <table id="clientTable"></table>
+    <p class="small" style="margin-top:8px">Pills: solid green = submitted &amp; locked · orange = started, not submitted · grey = not started. Kaimahi can unlock a submitted week from the client's wheel view.</p>
   </div>
 
   <!-- Client detail -->
@@ -46,6 +58,7 @@
     <p class="sub">Waitangi Wheel check-in &nbsp;·&nbsp; ● Week 1 &nbsp; ▲ Week 5 &nbsp; ■ Week 10</p>
     <div class="wheelbox" id="detailWheel"></div>
     <table id="detailTable"></table>
+    <div class="row noprint" id="detailLocks" style="margin-top:12px"></div>
   </div>
 
 </div>
@@ -57,7 +70,7 @@
   const $ = id => document.getElementById(id);
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  const cards = ["loginCard","listCard","detailCard"];
+  const cards = ["loginCard","dashCard","listCard","detailCard"];
   function show(...ids){
     cards.forEach(c => $(c).style.display = ids.includes(c) ? "" : "none");
   }
@@ -67,23 +80,101 @@
     return base + "?t=" + token;
   }
 
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+  }
+
   let clients = [];
 
   async function loadClients(){
     const { data, error } = await sb
       .from("clients")
-      .select("id, name, token, created_at, checkins(week, spokes, updated_at)")
+      .select("id, name, token, created_at, checkins(week, spokes, updated_at, submitted_at)")
       .order("created_at", { ascending: false });
     if(error){ $("listStatus").textContent = "Couldn't load clients: " + error.message; $("listStatus").className="status err"; return; }
     clients = data;
+    renderDashboard();
     renderList();
   }
 
+  /* ---------- Dashboard ---------- */
+
+  function renderDashboard(){
+    const total = clients.length;
+    const submitted = {};       // week -> array of spokes arrays (submitted only)
+    W.WEEKS.forEach(w => submitted[w] = []);
+    clients.forEach(c => c.checkins.forEach(ch => {
+      if(ch.submitted_at && Array.isArray(ch.spokes)) submitted[ch.week].push(ch.spokes);
+    }));
+
+    $("statgrid").innerHTML =
+      `<div class="stat"><div class="big">${total}</div><div class="lbl">Clients</div></div>` +
+      W.WEEKS.map(w =>
+        `<div class="stat"><div class="big" style="color:${W.WEEK_META[w].raw}">${submitted[w].length}</div>
+         <div class="lbl">${W.WEEK_META[w].name} submitted</div></div>`).join("");
+
+    const anySubmitted = W.WEEKS.some(w => submitted[w].length);
+    if(!anySubmitted){
+      $("dashTable").innerHTML = "";
+      $("dashNote").textContent = "Numbers appear here once whānau submit their check-ins.";
+      return;
+    }
+
+    function stats(w, i){
+      const vals = submitted[w].map(s => s[i]).filter(v => v != null);
+      if(!vals.length) return null;
+      const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
+      const high = vals.filter(v => v >= 4).length;
+      return { avg, high, n: vals.length };
+    }
+
+    let html = `<tr><th>Spoke</th>` +
+      W.WEEKS.map(w=>`<th style="color:${W.WEEK_META[w].raw}">${W.WEEK_META[w].name}</th>`).join("") +
+      `<th>Shift W1→W10</th></tr>`;
+
+    W.SPOKES.forEach((s,i)=>{
+      const cells = W.WEEKS.map(w=>{
+        const st = stats(w,i);
+        if(!st) return "<td>—</td>";
+        const pct = Math.round(st.avg/5*100);
+        return `<td><strong>${st.avg.toFixed(1)}</strong>
+          <div class="cellbar"><i style="width:${pct}%;background:${W.WEEK_META[w].raw}"></i></div>
+          <span class="small">${st.high}/${st.n} at 4–5</span></td>`;
+      }).join("");
+      const a = stats("w1",i), b = stats("w10",i);
+      let shift = "—";
+      if(a && b){
+        const d = b.avg - a.avg;
+        shift = d > 0.05 ? `<span class="chg-up">▲ +${d.toFixed(1)}</span>`
+              : d < -0.05 ? `<span class="chg-down">▼ ${d.toFixed(1)}</span>` : "◆ 0";
+      }
+      html += `<tr><td><strong>${s.label}</strong> <span class="small">${s.sub}</span></td>${cells}<td>${shift}</td></tr>`;
+    });
+
+    // overall row
+    const overallCells = W.WEEKS.map(w=>{
+      const all = [];
+      submitted[w].forEach(sp => sp.forEach(v => { if(v != null) all.push(v); }));
+      if(!all.length) return "<td>—</td>";
+      const avg = all.reduce((x,y)=>x+y,0)/all.length;
+      return `<td><strong>${avg.toFixed(1)}</strong></td>`;
+    }).join("");
+    html += `<tr style="border-top:2px solid var(--line)"><td><strong>Overall average</strong></td>${overallCells}<td></td></tr>`;
+
+    $("dashTable").innerHTML = html;
+    $("dashNote").textContent = "Averages are out of 5 · \"at 4–5\" = whānau scoring often/strongly present · submitted check-ins only.";
+  }
+
+  /* ---------- Client list ---------- */
+
   function weekPills(checkins){
     return W.WEEKS.map(w=>{
-      const done = checkins.some(c => c.week === w && (c.spokes||[]).some(v=>v));
+      const ch = checkins.find(c => c.week === w);
+      const started = ch && (ch.spokes||[]).some(v=>v);
+      const done = ch && ch.submitted_at;
       const nm = W.WEEK_META[w].name.replace("Week ","W");
-      return `<span class="pill ${done?"done":"todo"}">${nm}</span>`;
+      const cls = done ? "done" : started ? "draft" : "todo";
+      return `<span class="pill ${cls}">${nm}${done ? " ✓" : ""}</span>`;
     }).join("");
   }
 
@@ -116,32 +207,54 @@
     }));
   }
 
+  /* ---------- Client detail ---------- */
+
   function viewClient(c){
     const weeks = W.emptyWeeks();
     c.checkins.forEach(ch => { if(Array.isArray(ch.spokes)) weeks[ch.week] = ch.spokes; });
     $("detailName").textContent = c.name;
     W.render($("detailWheel"), { weeks, activeWeek: "w10", interactive: false });
     W.renderTable($("detailTable"), weeks);
+
+    let lockHtml = "";
+    W.WEEKS.forEach(w=>{
+      const ch = c.checkins.find(x => x.week === w);
+      if(ch && ch.submitted_at){
+        lockHtml += `<span class="pill done">${W.WEEK_META[w].name} locked ✓</span>
+          <button class="btn small" data-unlock="${w}">Unlock</button>&nbsp;&nbsp;`;
+      }
+    });
+    $("detailLocks").innerHTML = lockHtml
+      ? `<div style="width:100%;text-align:center">${lockHtml}<div class="small" style="margin-top:6px">Unlock only if a whānau needs to correct a genuine mistake — it reopens that week on their link.</div></div>`
+      : "";
+    document.querySelectorAll("[data-unlock]").forEach(b=>b.addEventListener("click", async ()=>{
+      const w = b.dataset.unlock;
+      if(!confirm(`Unlock ${W.WEEK_META[w].name} for ${c.name}? They will be able to change their marks again.`)) return;
+      const { error } = await sb.from("checkins").update({ submitted_at: null })
+        .eq("client_id", c.id).eq("week", w);
+      if(error){ alert("Couldn't unlock: " + error.message); return; }
+      await loadClients();
+      const fresh = clients.find(x => x.id === c.id);
+      if(fresh) viewClient(fresh);
+    }));
+
     show("detailCard");
   }
 
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
-  }
+  /* ---------- Auth & events ---------- */
 
-  // events
   $("loginBtn").addEventListener("click", async ()=>{
     $("loginError").textContent = "";
     const { error } = await sb.auth.signInWithPassword({
       email: $("email").value.trim(), password: $("password").value
     });
     if(error){ $("loginError").textContent = "Sign-in failed: " + error.message; return; }
-    show("listCard"); loadClients();
+    show("dashCard","listCard"); loadClients();
   });
   $("password").addEventListener("keydown", e => { if(e.key === "Enter") $("loginBtn").click(); });
 
   $("signOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); show("loginCard"); });
-  $("backBtn").addEventListener("click", ()=>{ show("listCard"); });
+  $("backBtn").addEventListener("click", ()=>{ show("dashCard","listCard"); });
 
   $("addBtn").addEventListener("click", async ()=>{
     const name = $("newName").value.trim();
@@ -155,14 +268,13 @@
     loadClients();
   });
 
-  // start
   (async function init(){
     if(cfg.SUPABASE_URL.startsWith("PASTE")){
       document.body.innerHTML = '<div class="msg">Not set up yet — the Supabase details in config.js are missing.</div>';
       return;
     }
     const { data: { session } } = await sb.auth.getSession();
-    if(session){ show("listCard"); loadClients(); }
+    if(session){ show("dashCard","listCard"); loadClients(); }
     else show("loginCard");
   })();
 })();

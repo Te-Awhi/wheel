@@ -1,12 +1,37 @@
 /* Shared Waitangi Wheel renderer — used by the client page and the admin page. */
 (function () {
   const SPOKES = [
-    { label: "Say", sub: "Understand & support tamaiti" },
-    { label: "Hear", sub: "Calm, aroha & encouragement" },
-    { label: "Feel", sub: "Confident, connected & hopeful" },
-    { label: "See", sub: "Positive change & wellbeing" },
-    { label: "Advocacy", sub: "Schools & services" },
-    { label: "Whanaungatanga", sub: "Rōpū & peers" }
+    {
+      label: "Say", sub: "Understanding",
+      statement: "Our whānau feels better equipped to understand and support our tamaiti."
+    },
+    {
+      label: "Hear", sub: "Aroha & calm",
+      statement: "There is more calm, aroha, and encouragement in our whānau relationships."
+    },
+    {
+      label: "Feel", sub: "Confidence & hope",
+      statement: "Our whānau feels more confident, connected, and hopeful about the path ahead."
+    },
+    {
+      label: "See", sub: "Positive change",
+      statement: "Our whānau can see positive change in how we respond to challenging moments and in the wellbeing of our whānau."
+    },
+    {
+      label: "Advocacy", sub: "Partnership",
+      statement: "Our whānau feels more confident engaging with schools and services and speaking up for our tamaiti's needs."
+    },
+    {
+      label: "Whanaungatanga", sub: "Support",
+      statement: "Our whānau feels supported by others in the rōpū and is able to share, learn, and grow alongside peers."
+    }
+  ];
+  const SCALE = [
+    "Not yet being felt in our whānau",
+    "Starting",
+    "Growing — sometimes present",
+    "Often present",
+    "Strongly present in our whānau"
   ];
   const WEEKS = ["w1", "w5", "w10"];
   const WEEK_META = {
@@ -14,7 +39,7 @@
     w5: { name: "Week 5", raw: "#c07a2e", shape: "triangle" },
     w10: { name: "Week 10", raw: "#5b4b8a", shape: "square" }
   };
-  const CX = 360, CY = 310, R = 205, LEVELS = 5;
+  const CX = 390, CY = 310, R = 200, LEVELS = 5, VIEW_W = 780, VIEW_H = 640;
 
   function emptyWeeks() {
     return { w1: [null, null, null, null, null, null], w5: [null, null, null, null, null, null], w10: [null, null, null, null, null, null] };
@@ -53,7 +78,7 @@
   function render(container, opts) {
     const weeks = opts.weeks;
     const activeWeek = opts.activeWeek || "w1";
-    let svg = `<svg viewBox="0 0 720 640" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;touch-action:manipulation">`;
+    let svg = `<svg viewBox="0 0 ${VIEW_W} ${VIEW_H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;touch-action:manipulation">`;
 
     for (let lv = 1; lv <= LEVELS; lv++) {
       const pts = [];
@@ -126,12 +151,27 @@
         const d = v10 - v1;
         chg = d > 0 ? `<span class="chg-up">▲ +${d}</span>` : d < 0 ? `<span class="chg-down">▼ ${d}</span>` : `<span>◆ 0</span>`;
       }
-      html += `<tr><td><strong>${s.label}</strong></td>` +
+      html += `<tr><td><strong>${s.label}</strong> <span class="small">${s.sub}</span></td>` +
         WEEKS.map(w => `<td>${(weeks[w] || [])[i] ?? ""}</td>`).join("") +
         `<td>${chg}</td></tr>`;
     });
     el.innerHTML = html;
   }
 
-  window.WaitangiWheel = { SPOKES, WEEKS, WEEK_META, emptyWeeks, render, renderTable };
+  /* Explanation block shared by both pages. */
+  function explanationHtml() {
+    return `
+      <p>This wheel is a visual check-in for your Whakamana journey. You'll mark it three times —
+      at <strong>Week 1</strong>, <strong>Week 5</strong> and <strong>Week 10</strong> — so you and your whānau can
+      see what is shifting across the hīkoi. The centre of the wheel holds mana, rangatiratanga and whānau voice.
+      There are no right or wrong answers — this is your whānau voice, not a test.</p>
+      <p><strong>How to score.</strong> For each spoke, choose where your whānau is right now:</p>
+      <ol class="scale">${SCALE.map(s => `<li>${s}</li>`).join("")}</ol>
+      <p><strong>What each spoke asks</strong> — how strongly does this feel true for your whānau right now?</p>
+      <ul class="statements">
+        ${SPOKES.map(s => `<li><strong>${s.label}</strong> <span class="small">(${s.sub})</span> — ${s.statement}</li>`).join("")}
+      </ul>`;
+  }
+
+  window.WaitangiWheel = { SPOKES, SCALE, WEEKS, WEEK_META, emptyWeeks, render, renderTable, explanationHtml };
 })();

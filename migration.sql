@@ -1,49 +1,10 @@
--- Waitangi Wheel — database schema for Supabase
--- Run this once in: Supabase dashboard → SQL Editor → New query → paste → Run
+-- Waitangi Wheel — migration 2: submit & lock
+-- Run once in Supabase SQL Editor (safe on the existing database).
 
--- ---------------------------------------------------------------
--- Tables
--- ---------------------------------------------------------------
+alter table public.checkins
+  add column if not exists submitted_at timestamptz;
 
-create table public.clients (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  token      text not null unique default encode(gen_random_bytes(16), 'hex'),
-  created_at timestamptz not null default now()
-);
-
-create table public.checkins (
-  id           uuid primary key default gen_random_uuid(),
-  client_id    uuid not null references public.clients(id) on delete cascade,
-  week         text not null check (week in ('w1', 'w5', 'w10')),
-  spokes       jsonb not null default '[null,null,null,null,null,null]'::jsonb,
-  updated_at   timestamptz not null default now(),
-  submitted_at timestamptz,
-  unique (client_id, week)
-);
-
--- ---------------------------------------------------------------
--- Row Level Security
--- Clients (anon) get NO direct table access — only the two
--- functions below, which require a valid personal-link token.
--- Signed-in staff (authenticated) get full access.
--- ---------------------------------------------------------------
-
-alter table public.clients  enable row level security;
-alter table public.checkins enable row level security;
-
-create policy "staff full access to clients"
-  on public.clients for all to authenticated
-  using (true) with check (true);
-
-create policy "staff full access to checkins"
-  on public.checkins for all to authenticated
-  using (true) with check (true);
-
--- ---------------------------------------------------------------
--- Client access functions (token = the personal link)
--- ---------------------------------------------------------------
-
+-- wheel_get now also returns whether each week is locked (submitted).
 create or replace function public.wheel_get(p_token text)
 returns jsonb
 language plpgsql security definer set search_path = public
@@ -75,6 +36,7 @@ begin
 end;
 $$;
 
+-- wheel_save refuses changes to a submitted (locked) week.
 create or replace function public.wheel_save(p_token text, p_week text, p_spokes jsonb)
 returns void
 language plpgsql security definer set search_path = public
@@ -106,6 +68,7 @@ begin
 end;
 $$;
 
+-- Lock in a completed week. Requires all six spokes to be marked.
 create or replace function public.wheel_submit(p_token text, p_week text)
 returns void
 language plpgsql security definer set search_path = public

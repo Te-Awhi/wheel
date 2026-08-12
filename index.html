@@ -13,9 +13,14 @@
 <div class="wrap">
   <div class="card">
     <h1>Waitangi Wheel check-in</h1>
-    <p class="sub" id="greeting">Mark each spoke from 1 to 5 &nbsp;·&nbsp; 1 = not yet felt &nbsp;·&nbsp; 5 = strongly present</p>
+    <p class="sub" id="greeting">Your whānau check-in for the Whakamana hīkoi</p>
 
     <div id="app" style="display:none">
+      <details class="explain noprint" id="explain">
+        <summary>He aha tēnei? — What is this wheel &amp; how do I score it?</summary>
+        <div id="explainBody"></div>
+      </details>
+
       <div class="row" id="weekbtns">
         <button class="weekbtn active" data-week="w1">
           <svg width="14" height="14"><circle cx="7" cy="7" r="6" fill="currentColor"/></svg> Week 1
@@ -27,10 +32,13 @@
           <svg width="14" height="14"><rect x="1" y="1" width="12" height="12" fill="currentColor"/></svg> Week 10
         </button>
       </div>
-      <p class="hint">Choose your week, then tap along each spoke to mark how it feels right now. Tap the same spot again to clear it.</p>
+      <p class="hint" id="hint">Tap along each spoke to mark how it feels right now. Tap the same spot again to clear it.</p>
 
       <div class="wheelbox" id="wheelbox"></div>
       <p class="status" id="status"></p>
+
+      <div id="submitArea" class="noprint" style="text-align:center;margin-top:10px"></div>
+
       <table id="summary"></table>
 
       <div class="actions">
@@ -47,51 +55,92 @@
   const W = window.WaitangiWheel;
   const cfg = window.WHEEL_CONFIG;
   const token = new URLSearchParams(location.search).get("t");
-  const msgEl = document.getElementById("message");
-  const appEl = document.getElementById("app");
-  const statusEl = document.getElementById("status");
+  const $ = id => document.getElementById(id);
 
   if(!token){
-    msgEl.textContent = "This page needs your personal link. Please use the link Te Awhi gave you.";
+    $("message").textContent = "This page needs your personal link. Please use the link Te Awhi gave you.";
     return;
   }
   if(cfg.SUPABASE_URL.startsWith("PASTE")){
-    msgEl.textContent = "Not set up yet — the Supabase details in config.js are missing.";
+    $("message").textContent = "Not set up yet — the Supabase details in config.js are missing.";
     return;
   }
 
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
   let weeks = W.emptyWeeks();
+  let locked = { w1:false, w5:false, w10:false };
   let activeWeek = "w1";
 
   function setStatus(text, cls){
-    statusEl.textContent = text;
-    statusEl.className = "status " + (cls || "");
+    $("status").textContent = text;
+    $("status").className = "status " + (cls || "");
   }
 
   function draw(){
-    W.render(document.getElementById("wheelbox"), {
-      weeks, activeWeek, interactive: true,
+    const isLocked = locked[activeWeek];
+    W.render($("wheelbox"), {
+      weeks, activeWeek, interactive: !isLocked,
       onTap: (axis, level) => {
+        if(locked[activeWeek]) return;
         weeks[activeWeek][axis] = (weeks[activeWeek][axis] === level) ? null : level;
         draw();
         save();
       }
     });
-    W.renderTable(document.getElementById("summary"), weeks);
+    W.renderTable($("summary"), weeks);
+    $("hint").textContent = isLocked
+      ? `${W.WEEK_META[activeWeek].name} has been submitted — it's locked in. Ka pai!`
+      : "Tap along each spoke to mark how it feels right now. Tap the same spot again to clear it.";
+    renderSubmit();
+  }
+
+  function renderSubmit(){
+    const area = $("submitArea");
+    const meta = W.WEEK_META[activeWeek];
+    if(locked[activeWeek]){
+      area.innerHTML = `<span class="lockbanner">✓ ${meta.name} submitted &amp; locked</span>`;
+      return;
+    }
+    const filled = weeks[activeWeek].filter(v => v).length;
+    area.innerHTML = `
+      <button class="btn primary" id="submitBtn" ${filled < 6 ? "disabled" : ""}>Submit ${meta.name}</button>
+      <div class="small" style="margin-top:6px;color:var(--mid)">
+        ${filled < 6 ? `Mark all six spokes to submit (${filled}/6 done).` : "Once submitted, this week is locked and can't be changed."}
+      </div>`;
+    const btn = $("submitBtn");
+    if(btn) btn.addEventListener("click", submitWeek);
   }
 
   let saveTimer = null;
   function save(){
     setStatus("Saving…");
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async ()=>{
-      const { error } = await sb.rpc("wheel_save", {
-        p_token: token, p_week: activeWeek, p_spokes: weeks[activeWeek]
-      });
-      if(error){ setStatus("Couldn't save — check your connection and tap again.", "err"); }
-      else { setStatus("Saved ✓", "ok"); setTimeout(()=>setStatus(""), 2000); }
-    }, 400);
+    saveTimer = setTimeout(saveNow, 400);
+  }
+  async function saveNow(){
+    clearTimeout(saveTimer);
+    const { error } = await sb.rpc("wheel_save", {
+      p_token: token, p_week: activeWeek, p_spokes: weeks[activeWeek]
+    });
+    if(error){ setStatus("Couldn't save — check your connection and tap again.", "err"); return false; }
+    setStatus("Saved ✓", "ok"); setTimeout(()=>setStatus(""), 2000);
+    return true;
+  }
+
+  async function submitWeek(){
+    const meta = W.WEEK_META[activeWeek];
+    if(!confirm(`Submit ${meta.name}? Once submitted, your marks for ${meta.name} are locked in and can't be changed.`)) return;
+    const wk = activeWeek;
+    const savedOk = await saveNow();
+    if(!savedOk) return;
+    const { error } = await sb.rpc("wheel_submit", { p_token: token, p_week: wk });
+    if(error){
+      setStatus("Couldn't submit — please try again.", "err");
+      return;
+    }
+    locked[wk] = true;
+    setStatus(`${meta.name} submitted ✓`, "ok");
+    draw();
   }
 
   document.querySelectorAll(".weekbtn").forEach(btn=>{
@@ -105,20 +154,29 @@
   (async function load(){
     const { data, error } = await sb.rpc("wheel_get", { p_token: token });
     if(error){
-      msgEl.textContent = "Something went wrong loading your wheel. Please try again shortly.";
+      $("message").textContent = "Something went wrong loading your wheel. Please try again shortly.";
       return;
     }
     if(!data){
-      msgEl.textContent = "This link wasn't recognised. Please check with Te Awhi for your personal link.";
+      $("message").textContent = "This link wasn't recognised. Please check with Te Awhi for your personal link.";
       return;
     }
     for(const w of W.WEEKS){
-      if(Array.isArray(data.weeks?.[w])) weeks[w] = data.weeks[w];
+      const entry = data.weeks?.[w];
+      if(Array.isArray(entry)){                 // old format
+        weeks[w] = entry;
+      } else if(entry && Array.isArray(entry.spokes)){
+        weeks[w] = entry.spokes;
+        locked[w] = !!entry.submitted;
+      }
     }
-    document.getElementById("greeting").textContent =
-      `Kia ora ${data.name} — mark each spoke from 1 to 5 · 1 = not yet felt · 5 = strongly present`;
-    msgEl.style.display = "none";
-    appEl.style.display = "";
+    $("greeting").textContent = `Kia ora ${data.name} — your whānau check-in for the Whakamana hīkoi`;
+    $("explainBody").innerHTML = W.explanationHtml();
+    // open the explanation the first time (no marks yet at all)
+    const nothingYet = W.WEEKS.every(w => !weeks[w].some(v=>v));
+    if(nothingYet) $("explain").setAttribute("open", "");
+    $("message").style.display = "none";
+    $("app").style.display = "";
     draw();
   })();
 })();
