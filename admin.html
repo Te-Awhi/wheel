@@ -22,14 +22,26 @@
     <p class="status err" id="loginError"></p>
   </div>
 
+  <!-- Client list -->
+  <div class="card noprint" id="listCard" style="display:none">
+    <div class="row noprint" style="justify-content:space-between">
+      <h2 style="margin:0">Clients</h2>
+      <button class="btn small" id="signOut">Sign out</button>
+    </div>
+    <div class="row" style="justify-content:flex-start">
+      <input type="text" id="newName" placeholder="New client name">
+      <button class="btn primary" id="addBtn">Add client</button>
+    </div>
+    <p class="status" id="listStatus"></p>
+    <table id="clientTable"></table>
+    <p class="small" style="margin-top:8px">Pills: solid green = submitted &amp; locked · orange = started, not submitted · grey = not started. Kaimahi can unlock a submitted week from the client's wheel view.</p>
+  </div>
+
   <!-- Dashboard -->
   <div class="card" id="dashCard" style="display:none">
     <div class="row noprint" style="justify-content:space-between">
       <h2 style="margin:0">Rōpū overview</h2>
-      <div>
-        <button class="btn small" onclick="window.print()">Print / save as PDF</button>
-        <button class="btn small" id="signOut">Sign out</button>
-      </div>
+      <button class="btn small" onclick="window.print()">Print / save as PDF</button>
     </div>
     <div class="statgrid" id="statgrid"></div>
     <div id="trendSection" style="display:none">
@@ -41,18 +53,6 @@
     </div>
     <table id="dashTable"></table>
     <p class="small" id="dashNote" style="text-align:center;margin-top:8px"></p>
-  </div>
-
-  <!-- Client list -->
-  <div class="card noprint" id="listCard" style="display:none">
-    <h2>Clients</h2>
-    <div class="row" style="justify-content:flex-start">
-      <input type="text" id="newName" placeholder="New client name">
-      <button class="btn primary" id="addBtn">Add client</button>
-    </div>
-    <p class="status" id="listStatus"></p>
-    <table id="clientTable"></table>
-    <p class="small" style="margin-top:8px">Pills: solid green = submitted &amp; locked · orange = started, not submitted · grey = not started. Kaimahi can unlock a submitted week from the client's wheel view.</p>
   </div>
 
   <!-- Client detail -->
