@@ -8,6 +8,7 @@
 create table public.clients (
   id         uuid primary key default gen_random_uuid(),
   name       text not null,
+  ropu       text,
   token      text not null unique default encode(gen_random_bytes(16), 'hex'),
   created_at timestamptz not null default now()
 );

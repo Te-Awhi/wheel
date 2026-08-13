@@ -30,6 +30,7 @@
     </div>
     <div class="row" style="justify-content:flex-start">
       <input type="text" id="newName" placeholder="New client name">
+      <input type="text" id="newRopu" placeholder="Rōpū / intake (optional)" style="min-width:170px;display:none">
       <button class="btn primary" id="addBtn">Add client</button>
     </div>
     <p class="status" id="listStatus"></p>
@@ -41,13 +42,23 @@
   <div class="card" id="dashCard" style="display:none">
     <div class="row noprint" style="justify-content:space-between">
       <h2 style="margin:0">Rōpū overview</h2>
-      <button class="btn small" onclick="window.print()">Print / save as PDF</button>
+      <div class="row" style="margin:0">
+        <select id="ropuFilter" style="display:none"></select>
+        <button class="btn small" id="csvBtn">Download CSV</button>
+        <button class="btn small" onclick="window.print()">Print / save as PDF</button>
+      </div>
     </div>
+    <p class="small" id="ropuNote" style="text-align:center;margin:0 0 6px;display:none"></p>
     <div class="statgrid" id="statgrid"></div>
     <div id="trendSection" style="display:none">
-      <h3 class="dashsec">Trend across the hīkoi</h3>
+      <h3 class="dashsec">Trend across the hīkoi — average (1–5)</h3>
       <div class="legend" id="trendLegend"></div>
       <div class="trendbox" id="trendbox"></div>
+      <h3 class="dashsec">Whānau at 4–5 — often / strongly present</h3>
+      <div class="legend" id="pctLegend"></div>
+      <div class="trendbox" id="pctbox"></div>
+      <h3 class="dashsec" id="partTitle">Participation — check-ins submitted</h3>
+      <div class="trendbox" id="partbox"></div>
       <h3 class="dashsec">Highlights</h3>
       <ul class="insights" id="insights"></ul>
     </div>
@@ -92,17 +103,54 @@
   }
 
   let clients = [];
+  let hasRopu = true;   // false until migration-ropu.sql has been run on the database
 
   async function loadClients(){
-    const { data, error } = await sb
+    let res = await sb
       .from("clients")
-      .select("id, name, token, created_at, checkins(week, spokes, updated_at, submitted_at)")
+      .select("id, name, token, ropu, created_at, checkins(week, spokes, updated_at, submitted_at)")
       .order("created_at", { ascending: false });
-    if(error){ $("listStatus").textContent = "Couldn't load clients: " + error.message; $("listStatus").className="status err"; return; }
-    clients = data;
+    if(res.error && /ropu/i.test(res.error.message)){
+      hasRopu = false;
+      res = await sb
+        .from("clients")
+        .select("id, name, token, created_at, checkins(week, spokes, updated_at, submitted_at)")
+        .order("created_at", { ascending: false });
+    }
+    if(res.error){ $("listStatus").textContent = "Couldn't load clients: " + res.error.message; $("listStatus").className="status err"; return; }
+    clients = res.data;
+    $("newRopu").style.display = hasRopu ? "" : "none";
+    renderRopuFilter();
     renderDashboard();
     renderList();
   }
+
+  /* ---------- Rōpū filter ---------- */
+
+  function ropuValues(){
+    return [...new Set(clients.map(c => c.ropu).filter(Boolean))].sort();
+  }
+
+  function renderRopuFilter(){
+    const sel = $("ropuFilter");
+    const vals = hasRopu ? ropuValues() : [];
+    if(!vals.length){ sel.style.display = "none"; sel.innerHTML = ""; return; }
+    const current = sel.value;
+    let html = `<option value="">All rōpū</option>` + vals.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+    if(clients.some(c => !c.ropu)) html += `<option value="__none__">(no rōpū)</option>`;
+    sel.innerHTML = html;
+    sel.value = [...sel.options].some(o => o.value === current) ? current : "";
+    sel.style.display = "";
+  }
+
+  function filteredClients(){
+    const sel = $("ropuFilter").value;
+    if(!sel) return clients;
+    if(sel === "__none__") return clients.filter(c => !c.ropu);
+    return clients.filter(c => c.ropu === sel);
+  }
+
+  $("ropuFilter").addEventListener("change", renderDashboard);
 
   /* ---------- Dashboard ---------- */
 
@@ -110,11 +158,17 @@
   const SPOKE_COLORS = ["#0f7e52","#3a6fb5","#c07a2e","#5b4b8a","#a04b3a","#0a8fae"];
   const OVERALL_COLOR = "#14453d";
 
+  let csvData = null;   // filled by renderDashboard for the CSV export
+
   function renderDashboard(){
-    const total = clients.length;
+    const pool = filteredClients();
+    const selRopu = $("ropuFilter").value;
+    $("ropuNote").style.display = selRopu ? "" : "none";
+    $("ropuNote").textContent = selRopu ? `Showing: ${selRopu === "__none__" ? "(no rōpū)" : selRopu}` : "";
+    const total = pool.length;
     const submitted = {};       // week -> array of spokes arrays (submitted only)
     W.WEEKS.forEach(w => submitted[w] = []);
-    clients.forEach(c => c.checkins.forEach(ch => {
+    pool.forEach(c => c.checkins.forEach(ch => {
       if(ch.submitted_at && Array.isArray(ch.spokes)) submitted[ch.week].push(ch.spokes);
     }));
 
@@ -129,6 +183,7 @@
       $("dashTable").innerHTML = "";
       $("trendSection").style.display = "none";
       $("dashNote").textContent = "Numbers appear here once whānau submit their check-ins.";
+      csvData = null;
       return;
     }
 
@@ -159,6 +214,32 @@
     $("trendLegend").innerHTML = trendSeries.map(s =>
       `<span class="key"><span class="swatch${s.dashed ? " dashed" : ""}" style="border-top-color:${s.color}"></span>${s.label}</span>`).join("");
     W.renderTrendChart($("trendbox"), { series: trendSeries, counts });
+
+    /* --- Whānau at 4–5 chart (%) --- */
+    const pctFmt = v => Math.round(v) + "%";
+    const pctSeries = W.SPOKES.map((s,i) => {
+      const values = {};
+      W.WEEKS.forEach(w => { const st = stats(w,i); values[w] = st ? st.high / st.n * 100 : null; });
+      return { label: s.label, color: SPOKE_COLORS[i], values };
+    });
+    $("pctLegend").innerHTML = pctSeries.map(s =>
+      `<span class="key"><span class="swatch" style="border-top-color:${s.color}"></span>${s.label}</span>`).join("");
+    W.renderTrendChart($("pctbox"), {
+      series: pctSeries, counts,
+      domain: { min: 0, max: 100 }, ticks: [0, 25, 50, 75, 100], fmt: pctFmt, tickSub: false
+    });
+
+    /* --- Participation chart --- */
+    const enrolled = Math.max(total, 1);
+    const partStep = Math.max(1, Math.ceil(enrolled / 4));
+    const partTicks = [];
+    for(let t = 0; t <= enrolled; t += partStep) partTicks.push(t);
+    if(partTicks[partTicks.length - 1] !== enrolled) partTicks.push(enrolled);
+    $("partTitle").textContent = `Participation — check-ins submitted (of ${total} enrolled)`;
+    W.renderTrendChart($("partbox"), {
+      series: [{ label: "Submitted", color: OVERALL_COLOR, values: { w1: counts.w1, w5: counts.w5, w10: counts.w10 } }],
+      counts, domain: { min: 0, max: enrolled }, ticks: partTicks, fmt: v => String(Math.round(v)), tickSub: false
+    });
 
     /* --- Highlights --- */
     const weeksWith = W.WEEKS.filter(w => counts[w]);
@@ -192,6 +273,7 @@
       items.push({ color: SPOKE_COLORS[hi.i], html: `<strong>Strongest at ${wname(latest)}:</strong> ${hi.s.label} — ${hi.s.sub} (${f(hi.st.avg)} · ${hi.st.high}/${hi.st.n} whānau at 4–5)` });
       if(lo.i !== hi.i) items.push({ color: SPOKE_COLORS[lo.i], html: `<strong>Focus area:</strong> ${lo.s.label} — ${lo.s.sub} (${f(lo.st.avg)} · ${lo.st.high}/${lo.st.n} whānau at 4–5) — where the mahi is` });
     }
+    items.push({ color: OVERALL_COLOR, html: `<strong>Participation:</strong> ${counts[latest]} of ${total} whānau submitted ${wname(latest)} — low numbers here mean fewer check-ins, not lower wellbeing` });
     $("insights").innerHTML = items.map(it => `<li><span class="dot" style="background:${it.color}"></span><span>${it.html}</span></li>`).join("");
 
     let html = `<tr><th>Spoke</th>` +
@@ -229,7 +311,51 @@
 
     $("dashTable").innerHTML = html;
     $("dashNote").textContent = "Averages are out of 5 · \"at 4–5\" = whānau scoring often/strongly present · submitted check-ins only.";
+
+    csvData = { selRopu, total, counts, overallVals, rows: W.SPOKES.map((s,i) => ({ label: s.label, sub: s.sub, weeks: W.WEEKS.map(w => stats(w,i)) })) };
   }
+
+  /* ---------- CSV export ---------- */
+
+  function csvCell(v){
+    const s = String(v ?? "");
+    const safe = /^[=+\-@]/.test(s) ? "'" + s : s;   // block spreadsheet formula injection
+    return /[",\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
+  }
+
+  $("csvBtn").addEventListener("click", () => {
+    if(!csvData){ alert("No submitted check-ins to export yet."); return; }
+    const d = csvData;
+    const lines = [];
+    lines.push(["Waitangi Wheel — rōpū dashboard export"]);
+    lines.push(["Rōpū", d.selRopu ? (d.selRopu === "__none__" ? "(no rōpū)" : d.selRopu) : "All rōpū"]);
+    lines.push(["Enrolled whānau", d.total]);
+    lines.push([]);
+    lines.push(["Week", "Check-ins submitted"]);
+    W.WEEKS.forEach(w => lines.push([W.WEEK_META[w].name, d.counts[w]]));
+    lines.push([]);
+    const head = ["Spoke", "Statement area"];
+    W.WEEKS.forEach(w => head.push(`${W.WEEK_META[w].name} average`, `${W.WEEK_META[w].name} at 4–5`, `${W.WEEK_META[w].name} n`));
+    head.push("Shift W1→W10");
+    lines.push(head);
+    d.rows.forEach(r => {
+      const row = [r.label, r.sub];
+      r.weeks.forEach(st => row.push(st ? st.avg.toFixed(2) : "", st ? st.high : "", st ? st.n : ""));
+      const a = r.weeks[0], b = r.weeks[2];
+      row.push(a && b ? (b.avg - a.avg).toFixed(2) : "");
+      lines.push(row);
+    });
+    const orow = ["Overall average", ""];
+    W.WEEKS.forEach(w => orow.push(d.overallVals[w] != null ? d.overallVals[w].toFixed(2) : "", "", d.counts[w]));
+    orow.push(d.overallVals.w1 != null && d.overallVals.w10 != null ? (d.overallVals.w10 - d.overallVals.w1).toFixed(2) : "");
+    lines.push(orow);
+    const csv = "\uFEFF" + lines.map(l => l.map(csvCell).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = "waitangi-wheel-dashboard.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
 
   /* ---------- Client list ---------- */
 
@@ -249,7 +375,7 @@
     let html = `<tr><th>Name</th><th>Check-ins</th><th>Personal link</th><th></th></tr>`;
     clients.forEach((c,i)=>{
       html += `<tr class="clientrow">
-        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td><strong>${escapeHtml(c.name)}</strong>${c.ropu ? ` <span class="small">· ${escapeHtml(c.ropu)}</span>` : ""}</td>
         <td>${weekPills(c.checkins)}</td>
         <td><button class="btn small" data-copy="${i}">Copy link</button></td>
         <td style="text-align:right">
@@ -325,9 +451,13 @@
   $("addBtn").addEventListener("click", async ()=>{
     const name = $("newName").value.trim();
     if(!name) return;
-    const { data, error } = await sb.from("clients").insert({ name }).select().single();
+    const row = { name };
+    const ropu = $("newRopu").value.trim();
+    if(hasRopu && ropu) row.ropu = ropu;
+    const { data, error } = await sb.from("clients").insert(row).select().single();
     if(error){ $("listStatus").textContent = "Couldn't add: " + error.message; $("listStatus").className = "status err"; return; }
     $("newName").value = "";
+    $("newRopu").value = "";
     await navigator.clipboard.writeText(clientLink(data.token)).catch(()=>{});
     $("listStatus").textContent = `${data.name} added — personal link copied to clipboard.`;
     $("listStatus").className = "status ok";

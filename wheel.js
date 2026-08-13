@@ -159,29 +159,37 @@
   }
 
   /**
-   * Trend line chart for the admin dashboard — one line per spoke, weeks on the x axis.
+   * Trend line chart for the admin dashboard — one line per series, weeks on the x axis.
    * opts: {
    *   series: [{ label, color, dashed?, values: {w1,w5,w10} (number|null) }],
-   *   counts: {w1,w5,w10}   // submitted check-ins per week
+   *   counts: {w1,w5,w10},          // submitted check-ins per week (tooltip + tick sub-labels)
+   *   domain: {min, max},           // y range; default 1–5 (the score scale)
+   *   ticks: [numbers],             // y gridlines; default 1..5
+   *   fmt: v => string,             // value formatter; default one decimal place
+   *   tickSub: false                // hide the "n submitted" tick sub-labels
    * }
    */
   function renderTrendChart(container, opts) {
     const series = opts.series || [];
     const counts = opts.counts || {};
+    const dmin = opts.domain ? opts.domain.min : 1;
+    const dmax = opts.domain ? opts.domain.max : 5;
+    const ticks = opts.ticks || [1, 2, 3, 4, 5];
+    const fmt = opts.fmt || (v => v.toFixed(1));
     const L = 40, R = 170, T = 18, B = 48, W = 760, H = 380;
     const plotW = W - L - R, plotH = H - T - B;
     const xw = i => L + i * plotW / (WEEKS.length - 1);
-    const yv = v => T + (5 - v) * plotH / 4;
+    const yv = v => T + (dmax - v) * plotH / (dmax - dmin);
 
     let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">`;
 
-    for (let v = 1; v <= 5; v++) {
-      svg += `<line x1="${L}" y1="${yv(v)}" x2="${L + plotW}" y2="${yv(v)}" stroke="${v === 1 ? "#c8d6c6" : "#e3ebe0"}" stroke-width="1"/>`;
-      svg += `<text x="${L - 10}" y="${yv(v) + 4}" text-anchor="end" font-size="11" fill="#7d9a8a">${v}</text>`;
-    }
+    ticks.forEach(v => {
+      svg += `<line x1="${L}" y1="${yv(v)}" x2="${L + plotW}" y2="${yv(v)}" stroke="${v === dmin ? "#c8d6c6" : "#e3ebe0"}" stroke-width="1"/>`;
+      svg += `<text x="${L - 10}" y="${yv(v) + 4}" text-anchor="end" font-size="11" fill="#7d9a8a">${opts.fmt ? fmt(v) : v}</text>`;
+    });
     WEEKS.forEach((w, i) => {
       svg += `<text x="${xw(i)}" y="${T + plotH + 22}" text-anchor="middle" font-size="12" font-weight="700" fill="#2f6b57">${WEEK_META[w].name}</text>`;
-      svg += `<text x="${xw(i)}" y="${T + plotH + 37}" text-anchor="middle" font-size="10" fill="#7d9a8a">${counts[w] || 0} submitted</text>`;
+      if (opts.tickSub !== false) svg += `<text x="${xw(i)}" y="${T + plotH + 37}" text-anchor="middle" font-size="10" fill="#7d9a8a">${counts[w] || 0} submitted</text>`;
     });
 
     svg += `<line class="tc-guide" x1="0" y1="${T}" x2="0" y2="${T + plotH}" stroke="#9db8a8" stroke-width="1" style="display:none"/>`;
@@ -212,7 +220,7 @@
     ends.forEach(e => {
       svg += `<line x1="${e.x + 7}" y1="${e.y}" x2="${labelX - 4}" y2="${e.ly}" stroke="#c8d6c6" stroke-width="1"/>`;
       svg += `<circle cx="${labelX + 3}" cy="${e.ly}" r="3.5" fill="${e.s.color}"/>`;
-      svg += `<text x="${labelX + 11}" y="${e.ly + 4}" font-size="11.5" fill="#14453d"><tspan font-weight="700">${e.v.toFixed(1)}</tspan> ${e.s.label}</text>`;
+      svg += `<text x="${labelX + 11}" y="${e.ly + 4}" font-size="11.5" fill="#14453d"><tspan font-weight="700">${fmt(e.v)}</tspan> ${e.s.label}</text>`;
     });
 
     WEEKS.forEach((w, i) => {
@@ -231,7 +239,7 @@
         const rows = series
           .filter(s => s.values[w] != null)
           .sort((a, b) => b.values[w] - a.values[w])
-          .map(s => `<div class="ttrow"><span class="dot" style="background:${s.color}"></span>${s.label} <b style="margin-left:auto">${s.values[w].toFixed(1)}</b></div>`)
+          .map(s => `<div class="ttrow"><span class="dot" style="background:${s.color}"></span>${s.label} <b style="margin-left:auto">${fmt(s.values[w])}</b></div>`)
           .join("");
         tt.innerHTML = `<strong>${WEEK_META[w].name}</strong> · ${counts[w] || 0} submitted${rows}`;
         tt.style.display = "block";

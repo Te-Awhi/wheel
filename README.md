@@ -44,7 +44,13 @@ If the database already exists from an earlier version, run `migration.sql` once
 - Whānau mark all six spokes, then tap **Submit** for that week. After a confirm, the week is locked — it can't be changed on their link.
 - The kaimahi can **Unlock** a submitted week from the client's wheel view in admin (for genuine corrections only).
 - The admin **Rōpū overview** dashboard counts *submitted* check-ins only: per-spoke averages, how many whānau score 4–5 ("often/strongly present"), and the Week 1 → Week 10 shift — ready for programme reporting.
-- The dashboard also draws a **trend chart** (one line per spoke across Week 1 → 5 → 10, plus a dashed overall line — hover a week for exact numbers) and a **Highlights** list: overall movement, most growth, anything that dipped, the strongest spoke, and the current focus area. Print / save as PDF includes both.
+- The dashboard also draws three charts (hover a week for exact numbers) and a **Highlights** list:
+  - **Trend across the hīkoi** — average score per spoke across Week 1 → 5 → 10, plus a dashed overall line.
+  - **Whānau at 4–5** — the percentage of submitted whānau scoring "often/strongly present" per spoke — the "3 of 12 → 9 of 12" story funders respond to.
+  - **Participation** — how many enrolled whānau actually submitted each week, so low numbers read as fewer check-ins rather than lower wellbeing.
+  - **Highlights** — overall movement, most growth, anything that dipped, strongest spoke, focus area, and participation.
+- **Download CSV** exports the dashboard numbers (per-spoke averages, at-4–5 counts, n, shifts, submissions per week) for reports and spreadsheets.
+- Clients can carry an optional **rōpū / intake** label (needs `migration-ropu.sql` run once in the SQL Editor). When labels exist, a dropdown on the dashboard filters everything — charts, highlights, table, CSV — to one intake at a time.
 
 ## Day-to-day use
 
