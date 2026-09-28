@@ -154,7 +154,7 @@
   (async function load(){
     const { data, error } = await sb.rpc("wheel_get", { p_token: token });
     if(error){
-      $("message").textContent = "Something went wrong loading your wheel. Please try again shortly.";
+      $("message").textContent = "Sorry — your wheel couldn't load just now. The service may be briefly offline. Please try again in a few minutes, or let your Te Awhi kaimahi know.";
       return;
     }
     if(!data){

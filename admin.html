@@ -20,6 +20,19 @@
     <div class="row"><input type="password" id="password" placeholder="Password" autocomplete="current-password"></div>
     <div class="row"><button class="btn primary" id="loginBtn">Sign in</button></div>
     <p class="status err" id="loginError"></p>
+    <p class="small" style="text-align:center;margin-top:10px">
+      <a href="#" id="forgotLink">Forgotten your password?</a> · No account yet? Ask Scout to invite you.
+    </p>
+  </div>
+
+  <!-- Set password (after an invite or password-reset email) -->
+  <div class="card" id="pwCard" style="display:none">
+    <h1>Waitangi Wheel — Kaimahi</h1>
+    <p class="sub" id="pwIntro">Kia ora — choose a password for your staff account</p>
+    <div class="row"><input type="password" id="pw1" placeholder="New password (8+ characters)" autocomplete="new-password"></div>
+    <div class="row"><input type="password" id="pw2" placeholder="Type it again" autocomplete="new-password"></div>
+    <div class="row"><button class="btn primary" id="pwBtn">Save password &amp; sign in</button></div>
+    <p class="status err" id="pwError"></p>
   </div>
 
   <!-- Client list -->
@@ -88,7 +101,7 @@
   const $ = id => document.getElementById(id);
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-  const cards = ["loginCard","dashCard","listCard","detailCard"];
+  const cards = ["loginCard","pwCard","dashCard","listCard","detailCard"];
   function show(...ids){
     cards.forEach(c => $(c).style.display = ids.includes(c) ? "" : "none");
   }
@@ -100,6 +113,26 @@
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+  }
+
+  const ADMIN_URL = location.origin + location.pathname;
+
+  /* Turn a Supabase error into something a kaimahi can act on. */
+  function friendly(error, what){
+    const m = (error && error.message) || String(error || "");
+    if(/fetch|network|Load failed|502|503|504|timeout/i.test(m)){
+      return `${what} — the wheel's database isn't responding. It may be paused or offline. Please let Scout know (scout.schultz@tawct.org.nz) and try again in a few minutes.`;
+    }
+    if(/Invalid login credentials/i.test(m)){
+      return "Email or password not recognised. Staff logins are set up by Scout — if you haven't been invited yet, ask Scout to add you, or use \"Forgotten your password?\" below.";
+    }
+    if(/Email not confirmed/i.test(m)){
+      return "This account hasn't finished being set up — open the invite email from Supabase and set your password first.";
+    }
+    if(/rate limit|too many/i.test(m)){
+      return "Too many attempts — wait a minute and try again.";
+    }
+    return `${what}: ${m}`;
   }
 
   let clients = [];
@@ -117,7 +150,7 @@
         .select("id, name, token, created_at, checkins(week, spokes, updated_at, submitted_at)")
         .order("created_at", { ascending: false });
     }
-    if(res.error){ $("listStatus").textContent = "Couldn't load clients: " + res.error.message; $("listStatus").className="status err"; return; }
+    if(res.error){ $("listStatus").textContent = friendly(res.error, "Couldn't load clients"); $("listStatus").className="status err"; return; }
     clients = res.data;
     $("newRopu").style.display = hasRopu ? "" : "none";
     renderRopuFilter();
@@ -437,13 +470,47 @@
 
   $("loginBtn").addEventListener("click", async ()=>{
     $("loginError").textContent = "";
-    const { error } = await sb.auth.signInWithPassword({
-      email: $("email").value.trim(), password: $("password").value
-    });
-    if(error){ $("loginError").textContent = "Sign-in failed: " + error.message; return; }
+    const email = $("email").value.trim(), password = $("password").value;
+    if(!email || !password){ $("loginError").textContent = "Enter your email and password."; return; }
+    $("loginBtn").disabled = true;
+    let res;
+    try { res = await sb.auth.signInWithPassword({ email, password }); }
+    catch(e){ res = { error: e }; }
+    $("loginBtn").disabled = false;
+    if(res.error){ $("loginError").textContent = friendly(res.error, "Sign-in failed"); return; }
     show("dashCard","listCard"); loadClients();
   });
   $("password").addEventListener("keydown", e => { if(e.key === "Enter") $("loginBtn").click(); });
+
+  $("forgotLink").addEventListener("click", async e => {
+    e.preventDefault();
+    const email = $("email").value.trim();
+    if(!email){ $("loginError").textContent = "Type your email above first, then tap \"Forgotten your password?\"."; return; }
+    $("loginError").textContent = "";
+    let res;
+    try { res = await sb.auth.resetPasswordForEmail(email, { redirectTo: ADMIN_URL }); }
+    catch(err){ res = { error: err }; }
+    if(res.error){ $("loginError").textContent = friendly(res.error, "Couldn't send the reset email"); return; }
+    $("loginError").className = "status ok";
+    $("loginError").textContent = `If ${email} has a staff account, a password-reset email is on its way. Open the link on this device.`;
+    setTimeout(()=>{ $("loginError").className = "status err"; }, 8000);
+  });
+
+  $("pwBtn").addEventListener("click", async ()=>{
+    $("pwError").textContent = "";
+    const a = $("pw1").value, b = $("pw2").value;
+    if(a.length < 8){ $("pwError").textContent = "Use at least 8 characters."; return; }
+    if(a !== b){ $("pwError").textContent = "The two passwords don't match."; return; }
+    $("pwBtn").disabled = true;
+    let res;
+    try { res = await sb.auth.updateUser({ password: a }); }
+    catch(e){ res = { error: e }; }
+    $("pwBtn").disabled = false;
+    if(res.error){ $("pwError").textContent = friendly(res.error, "Couldn't save the password"); return; }
+    history.replaceState(null, "", ADMIN_URL);
+    show("dashCard","listCard"); loadClients();
+  });
+  $("pw2").addEventListener("keydown", e => { if(e.key === "Enter") $("pwBtn").click(); });
 
   $("signOut").addEventListener("click", async ()=>{ await sb.auth.signOut(); show("loginCard"); });
   $("backBtn").addEventListener("click", ()=>{ show("dashCard","listCard"); });
@@ -464,15 +531,40 @@
     loadClients();
   });
 
+  // Invite / password-reset links land here with #access_token=…&type=invite|recovery
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const linkType = hashParams.get("type");
+  const linkError = hashParams.get("error_description");
+
   (async function init(){
     if(cfg.SUPABASE_URL.startsWith("PASTE")){
       document.body.innerHTML = '<div class="msg">Not set up yet — the Supabase details in config.js are missing.</div>';
       return;
     }
-    const { data: { session } } = await sb.auth.getSession();
+    if(linkError){
+      show("loginCard");
+      $("loginError").textContent = "That link has expired or was already used (" + linkError.replace(/\+/g, " ") + "). Ask Scout for a fresh invite, or use \"Forgotten your password?\".";
+      history.replaceState(null, "", ADMIN_URL);
+      return;
+    }
+    let session = null;
+    try { ({ data: { session } } = await sb.auth.getSession()); }
+    catch(e){ /* treated as signed out */ }
+    if(session && (linkType === "invite" || linkType === "recovery" || linkType === "magiclink")){
+      $("pwIntro").textContent = linkType === "recovery"
+        ? "Choose a new password for your staff account"
+        : "Kia ora — choose a password for your staff account";
+      show("pwCard");
+      return;
+    }
     if(session){ show("dashCard","listCard"); loadClients(); }
     else show("loginCard");
   })();
+
+  // supabase-js fires this when a recovery link is consumed after the page loaded
+  sb.auth.onAuthStateChange((event) => {
+    if(event === "PASSWORD_RECOVERY") show("pwCard");
+  });
 })();
 </script>
 </body>

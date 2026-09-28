@@ -22,8 +22,9 @@ Interactive self-assessment wheel for the 10-week programme. Clients mark six sp
    - Free plan allows 2 *active* projects across your orgs — pause an unused one first if blocked.
 2. **SQL Editor → New query** → paste the whole of `schema.sql` → **Run**. You should see "Success".
 3. **Authentication → Sign In / Up**: turn **off** "Allow new users to sign up" (staff accounts are created by you, not self-service).
-4. **Authentication → Users → Add user → Create new user**: create each staff login (email + password). Tick "Auto confirm".
-5. **Project Settings → API**: copy the **Project URL** and the **anon public** key into `config.js`.
+4. **Authentication → URL Configuration**: set *Site URL* to `https://te-awhi.github.io/wheel/admin.html` and add `https://te-awhi.github.io/wheel/*` under *Redirect URLs* (invite and password-reset emails need this).
+5. **Authentication → Users → Add user → Send invitation**: invite each kaimahi by email. They open the email, land on the admin page and choose their own password. (You can also *Create new user* with a password you hand over.)
+6. **Project Settings → API**: copy the **Project URL** and the **anon public** key into `config.js`.
 
 ### 2. Hosting (GitHub Pages)
 1. In the Te-Awhi GitHub org, create a **public** repo called `wheel` (public is required for free Pages; nothing secret lives here — the anon key is public by design).
@@ -52,6 +53,24 @@ If the database already exists from an earlier version, run `migration.sql` once
 - **Download CSV** exports the dashboard numbers (per-spoke averages, at-4–5 counts, n, shifts, submissions per week) for reports and spreadsheets.
 - Clients can carry an optional **rōpū / intake** label (needs `migration-ropu.sql` run once in the SQL Editor). When labels exist, a dropdown on the dashboard filters everything — charts, highlights, table, CSV — to one intake at a time.
 
+## Staff access
+
+- New kaimahi: Supabase → **Authentication → Users → Add user → Send invitation**. The invite lands them on the admin page with a "choose a password" screen.
+- Forgotten password: type the email on the admin sign-in screen and tap **Forgotten your password?** — a reset email arrives with a link back to the admin page.
+- Sign-in errors now say what to do (no account yet / wrong password / database offline) instead of showing a raw error.
+- Sign-ups are **off** — only invited accounts can sign in. Anyone signed in can see every client, so remove leavers under Authentication → Users.
+
+## Keeping it awake (why it stopped in September 2026)
+
+The Te Awhi Supabase org is on the Free plan, which **pauses a project after 7 days without API traffic**. Because whānau check in at Week 1, 5 and 10 there are long quiet gaps, so the project was paused and both the client links and the admin page failed until it was restored.
+
+Two layers now stop that:
+
+1. `.github/workflows/keepalive.yml` pings the database every day (and emails the repo owner if the ping fails). Once a month it commits a heartbeat so GitHub doesn't disable the schedule for inactivity. Check it under the repo's **Actions** tab.
+2. **Recommended:** upgrade the Te Awhi org to **Pro** (US$25/month). Pro projects are never auto-paused, get daily backups and 7-day point-in-time recovery, and the keep-alive becomes a monitor rather than a lifeline.
+
+If the app ever says the database isn't responding: Supabase dashboard → project → **Restore**; it takes a few minutes and no data is lost.
+
 ## Day-to-day use
 
 1. Kaimahi signs in to the admin page → **Add client** → link is copied to clipboard.
@@ -64,4 +83,4 @@ If the database already exists from an earlier version, run `migration.sql` once
 - Client names + ratings are personal information — keep names minimal if possible (first name is enough).
 - Personal links act as keys: anyone with a client's link can see that client's wheel. Send links directly to the client only.
 - Data is stored in Supabase (region Sydney). Staff access is limited to accounts you create.
-- Free plan pauses the project after ~1 week of no use; if the app ever says it can't load, unpause the project in Supabase. For always-on production use, upgrade the Te Awhi org to Pro (US$25/mo).
+- See "Keeping it awake" above — the Free plan pauses idle projects; the keep-alive workflow and/or a Pro upgrade prevent that.
