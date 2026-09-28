@@ -1,0 +1,76 @@
+# Keeps the Waitangi Wheel Supabase project awake.
+#
+# Supabase pauses Free-plan projects after ~7 days with no API activity, which
+# is exactly what happens between Week 1 / Week 5 / Week 10 check-ins. This
+# workflow pings the database every day so it never goes idle, and fails loudly
+# (GitHub emails the repo owner) if the database stops responding.
+#
+# GitHub also switches off scheduled workflows in repos with no commits for 60
+# days, so once a month this workflow commits a timestamp to keep itself alive.
+#
+# The anon key below is the same public key that ships in config.js.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: "17 2 * * *"      # every day at 02:17 UTC (‚âà 14:17 NZST)
+  workflow_dispatch:           # "Run workflow" button for manual checks
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Supabase details from config.js
+        id: cfg
+        run: |
+          URL=$(grep -o 'https://[a-z0-9]*\.supabase\.co' config.js | head -1)
+          KEY=$(grep -o '"eyJ[^"]*"' config.js | head -1 | tr -d '"')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Ping the database (wheel_get RPC)
+        env:
+          URL: ${{ steps.cfg.outputs.url }}
+          KEY: ${{ steps.cfg.outputs.key }}
+        run: |
+          code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
+            -X POST "$URL/rest/v1/rpc/wheel_get" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"p_token":"keepalive-ping"}')
+          echo "HTTP $code ‚Äî $(cat /tmp/body)"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase did not answer normally (HTTP $code). The project may be paused ‚Äî check https://supabase.com/dashboard/project/zqhdulehkoxywtwselac"
+            exit 1
+          fi
+
+      - name: Ping auth as well
+        env:
+          URL: ${{ steps.cfg.outputs.url }}
+          KEY: ${{ steps.cfg.outputs.key }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/auth/v1/health" -H "apikey: $KEY")
+          echo "auth HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::Auth service not healthy (HTTP $code)"; exit 1; }
+
+      - name: Monthly heartbeat commit (keeps this schedule enabled)
+        run: |
+          f=.github/keepalive-heartbeat
+          last=$(cat "$f" 2>/dev/null || echo 0)
+          now=$(date +%s)
+          if [ $((now - last)) -lt $((28*24*3600)) ]; then
+            echo "Heartbeat is recent ‚Äî no commit needed."
+            exit 0
+          fi
+          echo "$now" > "$f"
+          git config user.name "keepalive-bot"
+          git config user.email "keepalive-bot@users.noreply.github.com"
+          git add "$f"
+          git commit -m "chore: keep-alive heartbeat $(date -u +%F)"
+          git push
